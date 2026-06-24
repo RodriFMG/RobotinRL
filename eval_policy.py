@@ -26,6 +26,10 @@ def main():
     ap.add_argument("--time_max", type=float, default=45.0)
     ap.add_argument("--record", type=str2bool, default=False)
     ap.add_argument("--seed", type=int, default=123)
+    ap.add_argument("--obs_source", type=str, default="sim",
+                    choices=["sim", "predicted_mask"],
+                    help="sim = obs del entorno; predicted_mask = RGB->segmentador propio->mask")
+    ap.add_argument("--seg_model", type=str, default="", help="ruta al .pth del segmentador")
     args = ap.parse_args()
 
     try:
@@ -34,11 +38,24 @@ def main():
         raise SystemExit("Falta Stable-Baselines3.  Instalalo con:  pip install stable-baselines3")
     from roombita_gym_env import RoombitaEnv
 
-    env = RoombitaEnv(track=args.track, obs_mode=args.obs_mode, obstacle_slots=args.obstacle_slots,
+    # sim-to-real: el robot ve RGB y un segmentador PROPIO produce la mask para PPO
+    segmenter = None
+    env_obs_mode = args.obs_mode
+    if args.obs_source == "predicted_mask":
+        if not args.seg_model:
+            raise SystemExit("--obs_source=predicted_mask requiere --seg_model models/seg_unet.pth")
+        from vision_segmenter import VisionSegmenter
+        segmenter = VisionSegmenter(args.seg_model, out_size=(84, 84))
+        env_obs_mode = "rgb"        # el entorno entrega RGB; la mask la predice el segmentador
+
+    env = RoombitaEnv(track=args.track, obs_mode=env_obs_mode, obstacle_slots=args.obstacle_slots,
                       obstacle_prob=args.obstacle_prob, time_max=args.time_max,
                       cam_w=84, cam_h=84, seed=args.seed,
                       render_mode="rgb_array" if args.record else None)
     model = PPO.load(args.model, device="auto")
+
+    def policy_obs(raw):
+        return segmenter.predict_seg_map(raw) if segmenter is not None else raw
 
     sess = None
     if args.record:
@@ -53,7 +70,7 @@ def main():
         done = False; R = 0.0
         rgb_l, seg_l, obs_l, rew_l, done_l = [], [], [], [], []
         while not done:
-            action, _ = model.predict(obs, deterministic=True)
+            action, _ = model.predict(policy_obs(obs), deterministic=True)
             obs, r, term, trunc, info = env.step(action); R += r
             done = term or trunc
             if args.record:

@@ -12,10 +12,13 @@ ROAD_COLOR = (0.22, 0.22, 0.25)
 
 # ============================== VISION ==============================
 class Vision:
-    def __init__(self, model, h=120, w=160, camera="eye"):
+    def __init__(self, model, h=120, w=160, camera="eye", max_geom=20000):
         self.m, self.cam, self.h, self.w = model, camera, h, w
-        self._rgb = mujoco.Renderer(model, h, w)
-        self._seg = mujoco.Renderer(model, h, w); self._seg.enable_segmentation_rendering()
+        self._max_geom = max(max_geom, model.ngeom + 2000)
+        self._rgb = mujoco.Renderer(model, h, w, max_geom=self._max_geom)
+        self._seg = self._make_seg()
+        self._ngeom = model.ngeom
+        self._last_ids = np.full((h, w), -1, np.int32)     # cache (fondo) -> nunca crashea
         self.line_ids = self._by_color(LINE_COLOR)
         self.road_ids = self._by_color(ROAD_COLOR)
         self.obs_ids = np.array([i for i in range(model.ngeom)
@@ -25,11 +28,36 @@ class Vision:
         return np.array([i for i in range(self.m.ngeom)
                          if np.allclose(self.m.geom_rgba[i, :3], c, atol=tol)])
 
+    def _make_seg(self):
+        r = mujoco.Renderer(self.m, self.h, self.w, max_geom=self._max_geom)
+        r.enable_segmentation_rendering()
+        return r
+
     def rgb(self, d):
         self._rgb.update_scene(d, camera=self.cam); return self._rgb.render()
 
     def _ids(self, d):
-        self._seg.update_scene(d, camera=self.cam); return self._seg.render()[..., 0]
+        """Render de segmentacion ROBUSTO. Nunca crashea por IDs fuera de rango:
+        - IDs desconocidos/invalidos -> fondo (-1).
+        - Si el render falla (IndexError de segid2output, etc.) recrea el renderer
+          y reintenta una vez; si aun falla devuelve el ultimo mapa bueno.
+        Funciona en visual / headless / grabacion / train mask / eval."""
+        for attempt in (0, 1):
+            try:
+                self._seg.update_scene(d, camera=self.cam)
+                ids = self._seg.render()[..., 0].astype(np.int32)
+                ids[(ids >= self._ngeom) | (ids < -1)] = -1        # invalidos -> fondo
+                self._last_ids = ids
+                return ids
+            except (IndexError, ValueError, RuntimeError):
+                if attempt == 0:
+                    try:
+                        self._seg = self._make_seg()               # modelo/escena desincronizados
+                    except Exception:
+                        break
+                    continue
+                break
+        return self._last_ids
 
     def mask(self, d, kind="line"):
         g = self._ids(d)

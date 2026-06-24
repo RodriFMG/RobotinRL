@@ -55,11 +55,14 @@ def main():
 
     policy = "MlpPolicy" if args.obs_mode == "state" else "CnnPolicy"
     model = PPO(policy, venv, verbose=1, seed=args.seed, device=args.device,
+
+                # a cada env parallel le da un trozo uniforme del num stepts
                 n_steps=2048 // max(args.n_envs, 1), batch_size=256,
                 gae_lambda=0.95, gamma=0.995, ent_coef=0.005, learning_rate=3e-4)
+    
     print(f"[train] track={args.track} obs_mode={args.obs_mode} policy={policy} "
           f"n_envs={args.n_envs} steps={args.total_timesteps}")
-    model.learn(total_timesteps=args.total_timesteps, progress_bar=False)
+    model.learn(total_timesteps=args.total_timesteps, progress_bar=True)
 
     out = args.save_path or os.path.join("models", f"{args.track}_{args.obs_mode}.zip")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)

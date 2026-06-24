@@ -9,10 +9,16 @@ ACCION (action_space): Box(-1, 1, shape=(2,))  -> [rueda_izq, rueda_der]
   robot real. Es continuo y acotado -> ideal para PPO.
 
 OBSERVACION (obs_mode):
-  - "state": vector compacto (rapido, sin render) -> PPO MlpPolicy.
-        [lat, sin(err), cos(err), v, w, on_track, rem, d_obs, sin(b_obs), cos(b_obs)]
-  - "mask" : mapa de segmentacion 3-clases (HxWx3 uint8) -> PPO CnnPolicy.
-  - "rgb"  : camara RGB reducida (HxWx3 uint8)          -> PPO CnnPolicy.
+  - "state"   : vector compacto (lat, err, v, w, on_track, rem, d_obs, b_obs).
+        *** OJO: es INFORMACION PRIVILEGIADA de MuJoCo (posicion exacta sobre la
+        pista, distancia real a obstaculos, etc.). El robot FISICO NO tiene acceso
+        a esto -> "state" NO es sim-to-real directo. Sirve solo para debug, baseline
+        o un entrenamiento idealizado/rapido. Usa MlpPolicy. ***
+  - "mask"    : mapa de segmentacion 3-clases (HxWx3) -> CnnPolicy.  [SIM-TO-REAL]
+  - "rgb"     : camara RGB reducida (HxWx3)            -> CnnPolicy.  [SIM-TO-REAL]
+  - "obstacle": mascara binaria de obstaculos (HxWx3)  -> CnnPolicy.  [SIM-TO-REAL]
+  mask/rgb/obstacle son el camino realista (solo dependen de la camara), y son los
+  que se usan con el segmentador propio (vision_segmenter.py) para sim-to-real.
 
 REWARD: usa arena_env.Rewards (progreso, llegada/contraria, choque con cooldown,
 esquive, salida/retorno, vuelco, timeout por distancia restante sobre la pista).
@@ -40,7 +46,7 @@ class RoombitaEnv(gym.Env):
                  brightness=1.0, random_brightness=False, cam_w=84, cam_h=84,
                  frame_skip=12, seed=None, render_mode=None):
         super().__init__()
-        assert obs_mode in ("state", "mask", "rgb")
+        assert obs_mode in ("state", "mask", "rgb", "obstacle")
         self.obs_mode = obs_mode
         self.track_name = track
         self.time_max = time_max
@@ -71,7 +77,7 @@ class RoombitaEnv(gym.Env):
         self.qadr = self.ep.qadr; self.dadr = self.ep.dadr
 
         self.vis = None
-        if obs_mode in ("mask", "rgb") or render_mode == "rgb_array":
+        if obs_mode in ("mask", "rgb", "obstacle") or render_mode == "rgb_array":
             self.vis = Vision(self.m, cam_h, cam_w)
 
         self.action_space = spaces.Box(-1.0, 1.0, (2,), np.float32)
@@ -114,6 +120,9 @@ class RoombitaEnv(gym.Env):
             return self._state_obs()
         if self.obs_mode == "mask":
             return self.vis.seg_map(self.d)
+        if self.obs_mode == "obstacle":
+            mk = self.vis.mask(self.d, "obstacle").astype(np.uint8)*255
+            return np.repeat(mk[..., None], 3, axis=2)
         return self.vis.rgb(self.d)
 
     # ---------------- API gym ----------------
