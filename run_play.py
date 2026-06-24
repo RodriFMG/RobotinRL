@@ -40,11 +40,15 @@ def diff_drive(v, w):
 
 
 def follow(mask, h, w):
-    mask = mask.copy(); mask[int(h*0.72):] = False
-    n = mask.sum()
-    if n < 25:
+    # franja CERCANA al robot (parte baja-media de la imagen): ahi la linea es
+    # grande y estable, y se tapa menos con gente/curvas lejanas.
+    band = mask.copy()
+    band[:int(h*0.45)] = False          # descarta lo muy lejano (arriba)
+    band[int(h*0.95):] = False          # descarta el borde inferior
+    n = band.sum()
+    if n < 20:
         return None
-    cx = (mask.sum(0) * np.arange(w)).sum() / n
+    cx = (band.sum(0) * np.arange(w)).sum() / n
     return (cx - w/2) / (w/2)
 
 
@@ -119,16 +123,20 @@ def main():
                  brightness=a.brightness, random_brightness=a.random_brightness)
         dyn.reset(); rew.reset()
         rgb_l, seg_l, obs_l, rew_l, done_l = [], [], [], [], []
-        sim_t = 0.0; last_w = 0.0; stuck = 0; recovery = 0.0
+        sim_t = 0.0; last_w = 0.0; stuck = 0; recovery = 0.0; lost = 0
         prev = rew._xy(); outcome = "running"; gstep = 0; done = False
         while not done:
             err = follow(vis.mask(d, "line"), a.camera_height, a.camera_width)
             if recovery > 0:
-                v, w = -0.5*v_robot, 1.8
+                v, w = -0.5*v_robot, 1.6
             elif err is not None:
-                w = -KP*err; v = v_robot*(1-0.55*min(abs(err), 1)); last_w = w
+                w = -KP*err; v = v_robot*(1-0.55*min(abs(err), 1)); last_w = w; lost = 0
             else:
-                w, v = np.sign(last_w+1e-6)*2.0, 0.25*v_robot
+                lost += 1
+                if lost <= 12:                      # perdida breve (gente/curva): seguir derecho
+                    w = float(np.clip(last_w, -0.6, 0.6)); v = 0.55*v_robot
+                else:                               # perdida sostenida: arco LENTO, sin trompo
+                    w = np.sign(last_w+1e-6)*1.0; v = 0.18*v_robot
             d.ctrl[lid], d.ctrl[rid] = diff_drive(v, w)
             d.ctrl[pan] = 0.0; d.ctrl[tilt] = 0.0
 

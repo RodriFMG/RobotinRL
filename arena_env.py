@@ -37,27 +37,19 @@ class Vision:
         self._rgb.update_scene(d, camera=self.cam); return self._rgb.render()
 
     def _ids(self, d):
-        """Render de segmentacion ROBUSTO. Nunca crashea por IDs fuera de rango:
-        - IDs desconocidos/invalidos -> fondo (-1).
-        - Si el render falla (IndexError de segid2output, etc.) recrea el renderer
-          y reintenta una vez; si aun falla devuelve el ultimo mapa bueno.
-        Funciona en visual / headless / grabacion / train mask / eval."""
-        for attempt in (0, 1):
-            try:
-                self._seg.update_scene(d, camera=self.cam)
-                ids = self._seg.render()[..., 0].astype(np.int32)
-                ids[(ids >= self._ngeom) | (ids < -1)] = -1        # invalidos -> fondo
-                self._last_ids = ids
-                return ids
-            except (IndexError, ValueError, RuntimeError):
-                if attempt == 0:
-                    try:
-                        self._seg = self._make_seg()               # modelo/escena desincronizados
-                    except Exception:
-                        break
-                    continue
-                break
-        return self._last_ids
+        """Render de segmentacion ROBUSTO. Nunca crashea por IDs fuera de rango.
+        - IDs invalidos -> fondo (-1).
+        - Si el render falla, devuelve el ULTIMO mapa bueno (cache). NO recrea el
+          renderer en cada fallo: recrearlo por frame desestabiliza el contexto GL
+          en Windows y deja la mascara vacia -> el robot pierde la linea y gira."""
+        try:
+            self._seg.update_scene(d, camera=self.cam)
+            ids = self._seg.render()[..., 0].astype(np.int32)
+            ids[(ids >= self._ngeom) | (ids < -1)] = -1        # invalidos -> fondo
+            self._last_ids = ids
+            return ids
+        except (IndexError, ValueError, RuntimeError):
+            return self._last_ids                              # ultimo bueno -> sigue la linea
 
     def mask(self, d, kind="line"):
         g = self._ids(d)

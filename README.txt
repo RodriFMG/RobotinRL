@@ -9,16 +9,16 @@ Todo 100% MuJoCo (sin ROS2).
 ----------------------------------------------------------------
  ARCHIVOS
 ----------------------------------------------------------------
-  tracks.py            Catalogo de pistas + clase Track (progreso por arco).
-  arena_build.py       Construye arena.xml para una pista (mismo lab) + slots.
-  arena_env.py         Vision, ObstacleField, Lighting, Episode, Dynamics, Rewards.
-  run_play.py          Corre/graba episodios (seguidor scriptado). Config por CLI.
-  view_clip.py         Reproductor de clips .npz (RGB|seg|obstaculos + reward).
-  roombita_gym_env.py  Entorno Gymnasium (obs_mode state/mask/rgb; accion = ruedas).
-  train_ppo.py         Entrena PPO (Stable-Baselines3).
-  eval_policy.py       Evalua un modelo entrenado, con grabacion opcional.
-  arena.xml            Ultima arena generada (se regenera al elegir pista).
-  textures/ meshes/    Assets procedurales (se autogeneran si faltan).
+x  tracks.py            Catalogo de pistas + clase Track (progreso por arco).
+x  arena_build.py       Construye arena.xml para una pista (mismo lab) + slots.
+x  arena_env.py         Vision, ObstacleField, Lighting, Episode, Dynamics, Rewards.
+o  run_play.py          Corre/graba episodios (seguidor scriptado). Config por CLI.
+x  view_clip.py         Reproductor de clips .npz (RGB|seg|obstaculos + reward).
+o   .py  Entorno Gymnasium (obs_mode state/mask/rgb; accion = ruedas).
+o  train_ppo.py         Entrena PPO (Stable-Baselines3).
+x  eval_policy.py       Evalua un modelo entrenado, con grabacion opcional.
+x  arena.xml            Ultima arena generada (se regenera al elegir pista).
+x  textures/ meshes/    Assets procedurales (se autogeneran si faltan).
 
 ----------------------------------------------------------------
  ESTRUCTURA DE CARPETAS
@@ -91,3 +91,152 @@ Todo 100% MuJoCo (sin ROS2).
   retorno a pista             : ret         = +1.5
   vuelco / inestabilidad      : flip        = -8.0  (termina episodio)
   estancamiento               : stuck       = -1.0  por segundo (acotado)
+----------------------------------------------------------------
+
+ACCIONES (action_space)
+
+numero de acciones : 2
+tipo : Box(-1, 1, shape=(2,))
+archivo : roombita_gym_env.py
+significado : [rueda_izquierda, rueda_derecha]
+
+Cada valor controla la velocidad de una rueda del robot.
+Internamente se escala a velocidad angular, aproximadamente hasta +/-18 rad/s.
+
+action[0] : rueda izquierda
+- valor positivo -> gira hacia adelante
+- valor negativo -> gira hacia atras
+- valor cercano 0 -> rueda casi detenida
+
+action[1] : rueda derecha
+- valor positivo -> gira hacia adelante
+- valor negativo -> gira hacia atras
+- valor cercano 0 -> rueda casi detenida
+
+Ejemplos:
+[ 1.0, 1.0] -> avanzar recto
+[-1.0, -1.0] -> retroceder recto
+[ 1.0, -1.0] -> girar sobre su eje
+[ 0.5, 1.0] -> curva hacia un lado
+[ 1.0, 0.5] -> curva hacia el otro lado
+
+----------------------------------------------------------------
+
+ESTADOS / OBSERVACIONES (observation_space)
+
+archivo : roombita_gym_env.py
+modos : obs_mode=state | obs_mode=mask | obs_mode=rgb
+
+El entorno permite 3 tipos de observacion para entrenar PPO:
+
+obs_mode=state
+
+state: vector de 10 elementos
+
+[lat, sin(err), cos(err), v, w, on_track, rem, d_obs, sin(b_obs), cos(b_obs)]
+
+lat:
+Error lateral respecto al centro de la pista.
+Indica que tan lejos esta el robot de la linea/ruta ideal.
+
+sin(err):
+Seno del error angular entre la orientacion del robot y la direccion
+correcta de avance sobre la pista.
+
+cos(err):
+Coseno del error angular.
+Se usa junto con sin(err) para evitar saltos bruscos de angulo.
+
+v:
+Velocidad lineal del robot.
+
+w:
+Velocidad angular del robot.
+
+on_track:
+Indica si el robot esta dentro de la pista.
+Normalmente 1 = en pista, 0 = fuera de pista.
+
+rem:
+Distancia restante hasta la meta, medida sobre la pista.
+No es distancia en linea recta, es distancia siguiendo el recorrido.
+
+d_obs:
+Distancia al obstaculo mas cercano o mas relevante.
+
+sin(b_obs):
+Seno del angulo hacia el obstaculo.
+
+cos(b_obs):
+Coseno del angulo hacia el obstaculo.
+
+Politica usada:
+obs_mode=state -> MlpPolicy
+
+obs_mode=mask
+
+mask: imagen de segmentacion 84x84x3 uint8
+
+Representa la vista procesada de la camara del robot.
+Es una observacion mas limpia que RGB porque separa elementos importantes
+como pista, linea, obstaculos y fondo.
+
+Uso:
+Sirve para entrenar al agente con informacion visual segmentada.
+Es mas facil que RGB porque reduce el ruido visual del laboratorio.
+
+Politica usada:
+obs_mode=mask -> CnnPolicy
+
+obs_mode=rgb
+
+rgb: imagen RGB 84x84x3 uint8
+
+Representa directamente lo que ve la camara del robot.
+
+Incluye:
+- pista
+- linea
+- obstaculos
+- suelo
+- mesas
+- personas
+- cambios de iluminacion
+- ruido visual del laboratorio
+
+Uso:
+Es el modo mas realista, pero tambien el mas dificil de entrenar.
+
+Politica usada:
+obs_mode=rgb -> CnnPolicy
+
+MODELO DE VISION / DEEP LEARNING
+
+Actualmente no hay un modelo de vision propio creado manualmente por nosotros.
+
+Cuando se usa obs_mode=mask o obs_mode=rgb, el procesamiento visual lo hace
+Stable-Baselines3 mediante CnnPolicy.
+
+Internamente CnnPolicy usa una CNN llamada NatureCNN, basada en la arquitectura
+clasica usada en Atari DQN.
+
+Ubicacion dentro del entorno virtual:
+
+  venv/Lib/site-packages/stable_baselines3/common/torch_layers.py
+
+Clase:
+
+  NatureCNN
+
+En train_ppo.py la seleccion de politica se hace con:
+
+  policy = "MlpPolicy" if obs_mode == "state" else "CnnPolicy"
+
+Entonces:
+
+  obs_mode=state -> MlpPolicy, red densa para el vector de 10 estados.
+  obs_mode=mask  -> CnnPolicy, CNN para procesar la mascara.
+  obs_mode=rgb   -> CnnPolicy, CNN para procesar el frame RGB.
+
+Si mas adelante se quiere usar una CNN propia, se debe modificar train_ppo.py
+usando policy_kwargs y un features_extractor_class personalizado.

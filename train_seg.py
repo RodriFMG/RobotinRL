@@ -65,7 +65,7 @@ def main():
 
     dev = args.device
     model = MiniUNet(num_classes=n).to(dev)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     crit = nn.CrossEntropyLoss()
 
     best = 0.0; hist = []
