@@ -104,6 +104,8 @@ def main():
 
     ap.add_argument("--cam_w", type=int, default=84)
     ap.add_argument("--cam_h", type=int, default=84)
+    ap.add_argument("--seg_res", type=int, default=256,
+                    help="resolucion ALTA del RGB para segmentar; la mascara que recibe la politica queda en cam_w/cam_h")
 
     ap.add_argument("--show", type=str2bool, default=True,
                     help="Muestra ventana OpenCV durante evaluación.")
@@ -163,8 +165,8 @@ def main():
         obstacle_prob=args.obstacle_prob,
         obstacle_count_mode=args.obstacle_count_mode,
         time_max=args.time_max,
-        cam_w=args.cam_w,
-        cam_h=args.cam_h,
+        cam_w=(args.seg_res if args.obs_mode == "seg" else args.cam_w),
+        cam_h=(args.seg_res if args.obs_mode == "seg" else args.cam_h),
         seed=args.seed,
         render_mode="rgb_array",
     )
@@ -246,12 +248,7 @@ def main():
             sim_seg_view = env.vis.seg_map(env.d)
             obstacle_view = env.vis.overlay(rgb_view, env.d)
 
-            if segmenter is not None:
-                pred_seg_view = segmenter.predict_seg_map(rgb_view)
-            else:
-                pred_seg_view = obs_for_policy
-
-            pred_seg_view = ensure_uint8_img(pred_seg_view)
+            pred_seg_view = ensure_uint8_img(obs_for_policy)
 
             # Mostrar ventana
             if args.show:
@@ -276,7 +273,7 @@ def main():
                     cv2.LINE_AA,
                 )
 
-                cv2.imshow("Roombita PPO Evaluation", canvas)
+                cv2.imshow("Roombita PPO Evaluation", cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
 
                 key = cv2.waitKey(delay) & 0xFF
                 if key in (ord("q"), 27):

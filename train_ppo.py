@@ -178,13 +178,17 @@ def make_env_fn(args, seed):
 
     def _f():
         env_obs_mode = "rgb" if args.obs_mode == "seg" else args.obs_mode
+        cam_w = args.seg_res if args.obs_mode == "seg" else args.cam_w
+        cam_h = args.seg_res if args.obs_mode == "seg" else args.cam_h
+        
         env = RoombitaEnv(
             track=args.track, obs_mode=env_obs_mode,
             obstacle_slots=args.obstacle_slots, obstacle_prob=args.obstacle_prob,
             obstacle_count_mode=args.obstacle_count_mode, time_max=args.time_max,
             random_brightness=args.random_brightness,
-            cam_w=args.cam_w, cam_h=args.cam_h, seed=seed,
+            cam_w=cam_w, cam_h=cam_h, seed=seed,
         )
+
         if args.obs_mode == "seg":
             env = SegmenterObsWrapper(env, seg_model_path=args.seg_model,
                                       cam_w=args.cam_w, cam_h=args.cam_h, seg_device=args.seg_device)
@@ -210,6 +214,8 @@ def main():
     # Camara
     ap.add_argument("--cam_w", type=int, default=84)
     ap.add_argument("--cam_h", type=int, default=84)
+    ap.add_argument("--seg_res", type=int, default=128,
+                    help="resolucion ALTA a la que se renderiza el RGB y segmenta; la mascara sale a cam_w/cam_h para PPO")
     # Obstaculos / episodio
     ap.add_argument("--obstacle_slots", type=int, default=4)
     ap.add_argument("--obstacle_prob", type=float, default=0.6)

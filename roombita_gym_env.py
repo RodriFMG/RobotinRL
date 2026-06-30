@@ -87,7 +87,12 @@ class RoombitaEnv(gym.Env):
             self.observation_space = spaces.Box(-5.0, 5.0, (10,), np.float32)
         else:
             self.observation_space = spaces.Box(0, 255, (cam_h, cam_w, 3), np.uint8)
+        
         self._t = 0.0
+        
+        # tope DURO de pasos derivado de time_max (trunca si o si, sin depender del tiempo sim)
+        self.max_steps = max(1, int(round(self.time_max / (self.frame_skip * self.dt))))
+        self._steps = 0
 
     # ---------------- estado interno ----------------
     def _robot(self):
@@ -139,7 +144,7 @@ class RoombitaEnv(gym.Env):
                       prob=self.obstacle_prob, mode=self.obstacle_count_mode,
                       lighting=self.light, brightness=self.brightness,
                       random_brightness=self.random_brightness)
-        self.dyn.reset(); self.rew.reset(); self._t = 0.0
+        self.dyn.reset(); self.rew.reset(); self._t = 0.0; self._steps = 0
         return self._obs(), {"track": self.track_name}
 
     def step(self, action):
@@ -154,6 +159,7 @@ class RoombitaEnv(gym.Env):
             self.dyn.update(self.dt); mujoco.mj_step(self.m, self.d); self._t += self.dt
 
         r, terminal, oc = self.rew.step(self.frame_skip*self.dt)
+        self._steps += 1
         terminated = False; truncated = False
         if oc == "goal":
             r += self.rew.arrival_reward(self._t, self.time_max); terminated = True
@@ -161,7 +167,7 @@ class RoombitaEnv(gym.Env):
             r += self.rew.reverse_reward(); terminated = True
         elif oc in ("flip", "lost"):
             terminated = True
-        elif self._t >= self.time_max:
+        elif self._t >= self.time_max or self._steps >= self.max_steps:
             tr, _ = self.rew.timeout_reward(); r += tr; truncated = True
 
         info = {"outcome": oc or ("timeout" if truncated else "running"),
