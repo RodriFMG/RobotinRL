@@ -1,12 +1,12 @@
 """
 roombita_gym_env.py - entorno Gymnasium para entrenar la roombita con PPO.
 
-ACCION (action_space): Box(-1, 1, shape=(2,))  -> [rueda_izq, rueda_der]
-  Velocidades de rueda normalizadas. Se escalan a +-MAX_WHEEL rad/s y se aplican
-  directo a los motores. Elegimos velocidades de rueda (no v/omega) porque es el
-  control mas directo del differential drive: el policy aprende a coordinar ambas
-  ruedas sin que nosotros invirtamos cinematica, y mapea 1:1 a lo que hace el
-  robot real. Es continuo y acotado -> ideal para PPO.
+ACCION (action_space): Box(-1, 1, shape=(2,))  -> [v, w]
+  v = velocidad LINEAL normalizada  (-1..1 -> -MAX_V..MAX_V m/s)   -> moverse recto
+  w = velocidad ANGULAR normalizada (-1..1 -> -MAX_W..MAX_W rad/s) -> girar / curva
+  Es el comando (v, w) tipo Twist que recibe el robot REAL. Adentro se convierte a
+  velocidades de rueda con la cinematica diferencial, asi el policy saca EXACTAMENTE
+  el mismo comando que se le manda al robot fisico (interfaz de control sim-to-real).
 
 OBSERVACION (obs_mode):
   - "state"   : vector compacto (lat, err, v, w, on_track, rem, d_obs, b_obs).
@@ -34,8 +34,10 @@ from tracks import get_track
 from arena_build import build_arena
 from arena_env import Vision, ObstacleField, Lighting, Episode, Dynamics, Rewards
 
-MAX_WHEEL = 18.0
+MAX_V = 0.6        # m/s   velocidad LINEAL maxima
+MAX_W = 3.0        # rad/s velocidad ANGULAR maxima
 WHEEL_R, HALF_AXLE = 0.028, 0.085
+WHEEL_MAX = 22.0   # tope del actuador (ctrlrange del XML)
 
 
 class RoombitaEnv(gym.Env):
@@ -141,8 +143,13 @@ class RoombitaEnv(gym.Env):
         return self._obs(), {"track": self.track_name}
 
     def step(self, action):
-        a = np.clip(np.asarray(action, np.float32), -1, 1)*MAX_WHEEL
-        self.d.ctrl[self.lid] = a[0]; self.d.ctrl[self.rid] = a[1]
+        a = np.clip(np.asarray(action, np.float32), -1, 1)
+        v = float(a[0])*MAX_V                          # velocidad lineal (m/s)
+        w = float(a[1])*MAX_W                          # velocidad angular (rad/s)
+        wl = (v - w*HALF_AXLE)/WHEEL_R                 # cinematica diferencial -> ruedas
+        wr = (v + w*HALF_AXLE)/WHEEL_R
+        self.d.ctrl[self.lid] = float(np.clip(wl, -WHEEL_MAX, WHEEL_MAX))
+        self.d.ctrl[self.rid] = float(np.clip(wr, -WHEEL_MAX, WHEEL_MAX))
         for _ in range(self.frame_skip):
             self.dyn.update(self.dt); mujoco.mj_step(self.m, self.d); self._t += self.dt
 

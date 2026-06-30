@@ -1,9 +1,9 @@
 """
 train_seg.py - entrena el segmentador propio (MiniUNet) con los clips .npz.
-
+ 
   python train_seg.py --data_dir runs/ --target combined --epochs 20 \
          --batch_size 16 --lr 1e-3 --img_size 128 --save_path models/seg_unet.pth
-
+ 
 Guarda: modelo .pth (con config y num_classes), y metricas (loss, pixel acc, IoU/clase).
 """
 import os, json, argparse
@@ -11,24 +11,29 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
-
+ 
+try:
+    from tqdm import tqdm
+except ImportError:                       # si no esta tqdm, no rompe (barra dummy)
+    def tqdm(x, **k): return x
+ 
 from seg_dataset import SegClipDataset
 from seg_model import MiniUNet
-
-
+ 
+ 
 def confusion(pred, gt, n):
     k = (gt >= 0) & (gt < n)
     return np.bincount(n*gt[k].astype(int) + pred[k], minlength=n*n).reshape(n, n)
-
-
+ 
+ 
 def metrics_from_conf(c):
     inter = np.diag(c).astype(float)
     union = c.sum(1) + c.sum(0) - inter
     iou = inter / np.maximum(union, 1e-9)
     acc = inter.sum() / max(c.sum(), 1e-9)
     return acc, iou
-
-
+ 
+ 
 @torch.no_grad()
 def evaluate(model, loader, n, device, crit):
     model.eval(); conf = np.zeros((n, n), int); tot = 0.0; nb = 0
@@ -38,8 +43,8 @@ def evaluate(model, loader, n, device, crit):
         conf += confusion(out.argmax(1).cpu().numpy().ravel(), y.cpu().numpy().ravel(), n)
     acc, iou = metrics_from_conf(conf)
     return tot/max(nb, 1), acc, iou
-
-
+ 
+ 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", default="runs/")
@@ -53,7 +58,14 @@ def main():
     ap.add_argument("--save_path", default="models/seg_unet.pth")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
-
+ 
+    dev = args.device
+    if dev == "cuda" and torch.cuda.is_available():
+        print(f"[device] CUDA -> {torch.cuda.get_device_name(0)}")
+    else:
+        dev = "cpu"
+        print("[device] CPU")
+ 
     ds = SegClipDataset(args.data_dir, target=args.target, img_size=args.img_size,
                         max_frames_per_clip=args.max_frames_per_clip)
     n = ds.num_classes
@@ -62,19 +74,21 @@ def main():
     tl = DataLoader(tr, batch_size=args.batch_size, shuffle=True, num_workers=0)
     vl = DataLoader(va, batch_size=args.batch_size, shuffle=False, num_workers=0)
     print(f"[data] {len(ds)} frames | train {nt} / val {nv} | clases={n} ({args.target})")
-
-    dev = args.device
+ 
     model = MiniUNet(num_classes=n).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     crit = nn.CrossEntropyLoss()
-
+ 
     best = 0.0; hist = []
     for ep in range(1, args.epochs+1):
         model.train(); run = 0.0; nb = 0
-        for x, y in tl:
+        bar = tqdm(tl, desc=f"epoch {ep:2d}/{args.epochs}", leave=False)
+        for x, y in bar:
             x, y = x.to(dev), y.to(dev)
             opt.zero_grad(); out = model(x); loss = crit(out, y)
             loss.backward(); opt.step(); run += loss.item(); nb += 1
+            if hasattr(bar, "set_postfix"):
+                bar.set_postfix(loss=f"{run/nb:.3f}")
         vloss, vacc, viou = evaluate(model, vl, n, dev, crit)
         miou = float(viou.mean())
         iou_str = " ".join(f"c{c}={viou[c]:.2f}" for c in range(n))
@@ -91,7 +105,7 @@ def main():
     with open(os.path.splitext(args.save_path)[0]+"_metrics.json", "w") as f:
         json.dump({"config": vars(args), "history": hist, "best_miou": best}, f, indent=2)
     print(f"[ok] mejor mIoU={best:.3f} | modelo en {args.save_path}")
-
-
+ 
+ 
 if __name__ == "__main__":
     main()

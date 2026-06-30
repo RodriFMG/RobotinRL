@@ -67,8 +67,8 @@ def parse():
     ap.add_argument("--brightness", type=float, default=1.0)
     ap.add_argument("--random_brightness", type=str2bool, nargs="?", const=True, default=False)
     ap.add_argument("--record_fps", type=float, default=15.0)
-    ap.add_argument("--camera_width", type=int, default=160)
-    ap.add_argument("--camera_height", type=int, default=120)
+    ap.add_argument("--camera_width", type=int, default=640)     # alta calidad (cam real)
+    ap.add_argument("--camera_height", type=int, default=480)
     ap.add_argument("--episode_count", type=int, default=5)
     ap.add_argument("--headless", type=str2bool, nargs="?", const=True, default=False)
     ap.add_argument("--show_viewer", type=str2bool, nargs="?", const=True, default=True)
@@ -163,9 +163,9 @@ def main():
                         tr, _ = rew.timeout_reward(); r += tr; outcome = "timeout"; end = True
 
                     if a.save:
-                        rgb = vis.rgb(d)
-                        rgb_l.append(rgb); seg_l.append(vis.seg_map(d)); obs_l.append(vis.overlay(rgb, d))
+                        rgb_l.append(vis.rgb(d)); seg_l.append(vis.seg_map(d))
                         rew_l.append(r); done_l.append(end)
+                        
                     if end:
                         done = True; break
 
@@ -194,9 +194,9 @@ def main():
             np.savez_compressed(
                 fn,
                 rgb=np.asarray(rgb_l, np.uint8), seg=np.asarray(seg_l, np.uint8),
-                obstacle=np.asarray(obs_l, np.uint8),
                 reward=np.asarray(rew_l, np.float32), done=np.asarray(done_l, bool),
                 info=json.dumps(info), track_name=track.name, config=cfg_json)
+            
         if a.episode_count == 0:
             break
 

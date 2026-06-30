@@ -210,9 +210,9 @@ def build_arena(track, n_slots=12, path="arena.xml", seed=0):
       <joint damping="0.6"/></default>
   </default>
   <visual>
-    <global offwidth="1280" offheight="1280"/>
+    <global offwidth="1920" offheight="1080"/>
     <headlight diffuse="0.5 0.5 0.5" ambient="0.45 0.45 0.45"/>
-    <quality shadowsize="0"/>
+    <quality shadowsize="2048" offsamples="4"/>
   </visual>
   <asset>
     <material name="floor" rgba="0.5 0.5 0.52 1" reflectance="0.05"/>
@@ -222,7 +222,7 @@ def build_arena(track, n_slots=12, path="arena.xml", seed=0):
 {tex_assets}
   </asset>
   <worldbody>
-    <light name="key"  pos="-2 -2 4" dir="0.5 0.5 -1" diffuse="0.6 0.6 0.6" castshadow="false"/>
+    <light name="key"  pos="-2 -2 4" dir="0.5 0.5 -1" diffuse="0.6 0.6 0.6" castshadow="true"/>
     <light name="fill" pos="2 2 4"   dir="-0.5 -0.5 -1" diffuse="0.5 0.5 0.5" castshadow="false"/>
     <geom name="floor" type="plane" size="0 0 0.05" material="floor" condim="3" friction="1.0 0.005 0.0001"/>
     <geom type="box" pos="-4.6 0 1.3" size="0.05 4.5 1.3" material="wall"/>

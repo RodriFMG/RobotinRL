@@ -261,7 +261,7 @@ class Rewards:
       ret       + volver a la pista (> costo de salirse)
       flip      - vuelco/inestabilidad (TERMINA)
     """
-    DEFAULT_W = dict(progress=5.0, safe=0.03, arrival=20.0, speed_bonus=20.0,
+    DEFAULT_W = dict(progress=5.0, safe=0.02, arrival=20.0, speed_bonus=20.0,
                      wrong_dir=20.0, timeout=5.0, timeout_per_m=1.5,
                      collision=3.0, stuck=1.0, avoid=3.0, offtrack=0.10, ret=1.5, flip=8.0)
 
