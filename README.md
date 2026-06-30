@@ -79,7 +79,7 @@ x  textures/ meshes/    Assets procedurales (se autogeneran si faltan).
  REWARD ACTUAL (pesos por defecto en arena_env.Rewards.DEFAULT_W)
 ----------------------------------------------------------------
   avance correcto sobre pista : progress    = +5.0  por metro avanzado
-  paso seguro sin choque      : safe        = +0.03 por paso
+  paso seguro sin choque      : safe        = +0.05 por paso
   llegada correcta            : arrival     = +20.0
   bonus por rapidez           : speed_bonus = +20.0 * (time_max-t)/time_max
   llegada en direccion contraria: wrong_dir = -20.0   (= -arrival)
@@ -91,6 +91,9 @@ x  textures/ meshes/    Assets procedurales (se autogeneran si faltan).
   retorno a pista             : ret         = +1.5
   vuelco / inestabilidad      : flip        = -8.0  (termina episodio)
   estancamiento               : stuck       = -1.0  por segundo (acotado)
+  
+  avance contrario sobre pista: progress    = -5.0 por metro avanzado
+  paso contrario sin choque   : sage        = -0.05 por paso
 ----------------------------------------------------------------
 
 ACCIONES (action_space)
