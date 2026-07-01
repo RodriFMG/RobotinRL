@@ -46,13 +46,16 @@ class RoombitaEnv(gym.Env):
     def __init__(self, track="simple_line", obs_mode="state", obstacle_slots=8,
                  obstacle_prob=0.6, obstacle_count_mode="probabilistic", time_max=45.0,
                  brightness=1.0, random_brightness=False, cam_w=84, cam_h=84,
-                 frame_skip=12, seed=None, render_mode=None):
+                 frame_skip=12, seed=None, render_mode=None,
+                 arena_path="arena.xml", smooth_penalty=0.0):
         super().__init__()
         assert obs_mode in ("state", "mask", "rgb", "obstacle")
         self.obs_mode = obs_mode
         self.track_name = track
         self.time_max = time_max
         self.frame_skip = frame_skip
+        self.arena_path = arena_path            # XML propio por env -> parallel-safe
+        self.smooth_penalty = float(smooth_penalty)  # >0: penaliza |w| y cambios de accion
         self.obstacle_slots = obstacle_slots
         self.obstacle_prob = obstacle_prob
         self.obstacle_count_mode = obstacle_count_mode
@@ -63,8 +66,8 @@ class RoombitaEnv(gym.Env):
         self.cam_w, self.cam_h = cam_w, cam_h
 
         self.track = get_track(track, seed=self._seed)
-        build_arena(self.track, n_slots=max(obstacle_slots, 1), path="arena.xml", seed=self._seed)
-        self.m = mujoco.MjModel.from_xml_path("arena.xml")
+        build_arena(self.track, n_slots=max(obstacle_slots, 1), path=self.arena_path, seed=self._seed)
+        self.m = mujoco.MjModel.from_xml_path(self.arena_path)
         self.d = mujoco.MjData(self.m)
         self.dt = self.m.opt.timestep
         self.lid = self.m.actuator("left_motor").id
@@ -89,7 +92,8 @@ class RoombitaEnv(gym.Env):
             self.observation_space = spaces.Box(0, 255, (cam_h, cam_w, 3), np.uint8)
         
         self._t = 0.0
-        
+        self._prev_a = np.zeros(2, np.float32)     # accion anterior (para penalizar cambios)
+
         # tope DURO de pasos derivado de time_max (trunca si o si, sin depender del tiempo sim)
         self.max_steps = max(1, int(round(self.time_max / (self.frame_skip * self.dt))))
         self._steps = 0
@@ -145,6 +149,7 @@ class RoombitaEnv(gym.Env):
                       lighting=self.light, brightness=self.brightness,
                       random_brightness=self.random_brightness)
         self.dyn.reset(); self.rew.reset(); self._t = 0.0; self._steps = 0
+        self._prev_a[:] = 0.0
         return self._obs(), {"track": self.track_name}
 
     def step(self, action):
@@ -159,6 +164,14 @@ class RoombitaEnv(gym.Env):
             self.dyn.update(self.dt); mujoco.mj_step(self.m, self.d); self._t += self.dt
 
         r, terminal, oc = self.rew.step(self.frame_skip*self.dt)
+
+        # penalizacion de suavidad: castiga giro agresivo y cambios bruscos de comando.
+        # Reduce el jitter y mejora la transferencia sim2real. Off por defecto (=0).
+        if self.smooth_penalty > 0.0:
+            sp = self.smooth_penalty*(abs(w)/MAX_W + float(np.linalg.norm(a - self._prev_a)))
+            r -= sp; self.rew.total -= sp; self.rew.comp["smooth"] -= sp
+        self._prev_a = a.copy()
+
         self._steps += 1
         terminated = False; truncated = False
         if oc == "goal":

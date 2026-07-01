@@ -37,6 +37,13 @@ except ImportError:
     from gym import spaces
 
 
+def linear_schedule(initial_value):
+    """Schedule lineal para lr/clip: progress_remaining va de 1.0 (inicio) a 0.0 (fin)."""
+    def f(progress_remaining):
+        return progress_remaining * initial_value
+    return f
+
+
 # ---------------------------------------------------------------------
 # Wrapper: RGB del entorno -> segmentacion predicha por tu modelo .pth
 # ---------------------------------------------------------------------
@@ -159,15 +166,15 @@ def plot_training(records, out_dir, title=""):
 
     os.makedirs(out_dir, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%H-%M-%S")
-    png = os.path.join(out_dir, f"training_{stamp}.png")
-    fig.savefig(png, dpi=120)
+    pdf = os.path.join(out_dir, f"training_{stamp}.pdf")
+    fig.savefig(pdf, dpi=120)
     plt.close(fig)
 
     with open(os.path.join(out_dir, f"history_{stamp}.json"), "w") as f:
         json.dump(records, f, indent=2)
 
-    print(f"[plot] guardado: {png}")
-    return png
+    print(f"[plot] guardado: {pdf}")
+    return pdf
 
 
 # ---------------------------------------------------------------------
@@ -187,6 +194,8 @@ def make_env_fn(args, seed):
             obstacle_count_mode=args.obstacle_count_mode, time_max=args.time_max,
             random_brightness=args.random_brightness,
             cam_w=cam_w, cam_h=cam_h, seed=seed,
+            arena_path=f"arena_{seed}.xml",                 # XML propio -> parallel-safe
+            smooth_penalty=getattr(args, "smooth_penalty", 0.0),
         )
 
         if args.obs_mode == "seg":
@@ -231,6 +240,26 @@ def main():
     ap.add_argument("--ent_coef", type=float, default=0.005)
     ap.add_argument("--batch_size", type=int, default=256)
     ap.add_argument("--rollout_steps", type=int, default=2048)
+    ap.add_argument("--n_epochs", type=int, default=10)
+    ap.add_argument("--clip_range", type=float, default=0.2)
+    ap.add_argument("--lr_decay", action="store_true",
+                    help="learning rate lineal decreciente hasta 0 (recomendado en runs largos)")
+    ap.add_argument("--use_sde", action="store_true",
+                    help="gSDE: exploracion continua suave (recomendado en vision; se ignora en state)")
+    ap.add_argument("--sde_sample_freq", type=int, default=4)
+    # Eficiencia / robustez
+    ap.add_argument("--multitrack", action="store_true",
+                    help="asigna una pista distinta del pool a cada env paralelo (generalizacion)")
+    ap.add_argument("--frame_stack", type=int, default=1,
+                    help="apila N frames en modos de imagen (motion cues); usar 4 para vision")
+    ap.add_argument("--vecnormalize", action="store_true",
+                    help="normaliza obs/reward (SOLO obs_mode=state; guarda vecnormalize.pkl)")
+    ap.add_argument("--smooth_penalty", type=float, default=0.0,
+                    help="penaliza |w| y cambios bruscos de accion (control mas suave, mejor sim2real)")
+    ap.add_argument("--eval", action="store_true",
+                    help="EvalCallback: evalua periodicamente y guarda best_model.zip")
+    ap.add_argument("--eval_freq", type=int, default=25000)
+    ap.add_argument("--eval_episodes", type=int, default=10)
     # Guardado / reanudar
     ap.add_argument("--save_path", type=str, default=os.path.join("models", "policy_model.zip"),
                     help="donde se guarda la politica entrenada")
@@ -242,10 +271,22 @@ def main():
     args = ap.parse_args()
 
     try:
+        import torch
+        import torch.nn as nn
         from stable_baselines3 import PPO
-        from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+        from stable_baselines3.common.vec_env import (
+            DummyVecEnv, SubprocVecEnv, VecFrameStack, VecNormalize)
+        from stable_baselines3.common.callbacks import (
+            CheckpointCallback, EvalCallback, CallbackList)
     except ImportError:
         raise SystemExit("Falta Stable-Baselines3:  pip install stable-baselines3")
+
+    # optimizaciones PyTorch (aceleran conv/matmul en GPU sin cambiar resultados de forma notable)
+    torch.backends.cudnn.benchmark = True
+    try:
+        torch.set_float32_matmul_precision("high")
+    except Exception:
+        pass
 
     if args.obs_mode == "seg":
         if not args.seg_model or not os.path.exists(args.seg_model):
@@ -253,46 +294,117 @@ def main():
         if args.n_envs > 1:
             warnings.warn("obs_mode=seg con n_envs>1: cada proceso carga su propia copia del segmentador.")
 
-    VecEnv = SubprocVecEnv if args.n_envs > 1 else DummyVecEnv
-    venv = VecEnv([make_env_fn(args, args.seed + i) for i in range(args.n_envs)])
-
-    policy = "MlpPolicy" if args.obs_mode == "state" else "CnnPolicy"
+    is_state = (args.obs_mode == "state")
+    is_img = args.obs_mode in ("mask", "rgb", "obstacle", "seg")
+    policy = "MlpPolicy" if is_state else "CnnPolicy"
     n_steps = max(64, args.rollout_steps // max(args.n_envs, 1))
 
+    TRACK_POOL = ["oval", "s_curve", "zigzag", "simple_line", "hairpin", "complex"]
+
+    def _env_fns(n, base_seed):
+        fns = []
+        for i in range(n):
+            a = argparse.Namespace(**vars(args))
+            if args.multitrack:
+                a.track = TRACK_POOL[i % len(TRACK_POOL)]
+            fns.append(make_env_fn(a, base_seed + i))
+        return fns
+
+    def _build_vec(n, base_seed, for_eval=False):
+        VecEnv = SubprocVecEnv if n > 1 else DummyVecEnv
+        v = VecEnv(_env_fns(n, base_seed))
+        if is_img and args.frame_stack > 1:
+            v = VecFrameStack(v, n_stack=args.frame_stack)
+        if is_state and args.vecnormalize:
+            v = VecNormalize(v, norm_obs=True, norm_reward=(not for_eval),
+                             clip_obs=10.0, clip_reward=10.0, gamma=args.gamma,
+                             training=(not for_eval))
+        return v
+
+    if is_img and args.frame_stack > 1:
+        warnings.warn(f"frame_stack={args.frame_stack}: eval_policy.py debe apilar los mismos "
+                      f"frames o la politica no cargara (la obs tiene otra forma).")
+
+    venv = _build_vec(args.n_envs, args.seed)
+
     out = args.save_path
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    save_dir = os.path.dirname(out) or "."
+    os.makedirs(save_dir, exist_ok=True)
 
     # --- cargar politica existente o crear nueva ---
     load_from = args.model if (args.model and os.path.exists(args.model)) else None
     if args.model and not load_from:
         warnings.warn(f"--model={args.model} no existe; se entrena desde 0.")
 
+    lr = linear_schedule(args.learning_rate) if args.lr_decay else args.learning_rate
+
     if load_from:
         print(f"[resume] cargando politica desde: {load_from}")
         model = PPO.load(load_from, env=venv, device=args.device)
         print("[resume] politica cargada, continuo entrenamiento")
     else:
-        print("[new] creando PPO nuevo")
-        model = PPO(policy, venv, verbose=1, seed=args.seed, device=args.device,
-                    n_steps=n_steps, batch_size=args.batch_size, gae_lambda=args.gae_lambda,
-                    gamma=args.gamma, ent_coef=args.ent_coef, learning_rate=args.learning_rate)
+        new_device = "cpu" if is_state else args.device      # MLP va mas rapido en CPU
+        use_sde = bool(args.use_sde) and not is_state
+        policy_kwargs = dict(
+            net_arch=dict(pi=[256, 256], vf=[256, 256]),
+            activation_fn=nn.Tanh if is_state else nn.ReLU,
+        )
+        ppo_kwargs = dict(
+            verbose=1, seed=args.seed, device=new_device,
+            n_steps=n_steps, batch_size=args.batch_size, n_epochs=args.n_epochs,
+            gamma=args.gamma, gae_lambda=args.gae_lambda, clip_range=args.clip_range,
+            ent_coef=args.ent_coef, vf_coef=0.5, max_grad_norm=0.5, learning_rate=lr,
+            use_sde=use_sde, sde_sample_freq=(args.sde_sample_freq if use_sde else -1),
+            policy_kwargs=policy_kwargs,
+        )
+        print(f"[new] creando PPO nuevo (device={new_device}, use_sde={use_sde})")
+        try:
+            model = PPO(policy, venv, **ppo_kwargs)
+        except (ValueError, AssertionError, TypeError):
+            # SB3 antiguo (<1.8): net_arch en formato lista
+            ppo_kwargs["policy_kwargs"] = dict(
+                policy_kwargs, net_arch=[dict(pi=[256, 256], vf=[256, 256])])
+            model = PPO(policy, venv, **ppo_kwargs)
 
     print(f"[train] track={args.track} | obs_mode={args.obs_mode} | policy={policy} | "
-          f"n_envs={args.n_envs} | n_steps={n_steps} | total_timesteps={args.total_timesteps}")
+          f"n_envs={args.n_envs} | n_steps={n_steps} | frame_stack={args.frame_stack} | "
+          f"multitrack={args.multitrack} | total_timesteps={args.total_timesteps}")
     if args.obs_mode == "seg":
         print(f"[train] flujo visual: RGB -> {args.seg_model} -> mascara -> PPO")
 
+    # --- callbacks: historia + checkpoints (+ eval/best opcional) ---
     hist_cb = _make_history_callback()
+    cbs = [hist_cb, CheckpointCallback(
+        save_freq=max(args.total_timesteps // 10 // max(args.n_envs, 1), 1),
+        save_path=save_dir, name_prefix="ppo_ckpt")]
+    eval_env = None
+    if args.eval:
+        eval_env = _build_vec(1, args.seed + 9000, for_eval=True)
+        cbs.append(EvalCallback(
+            eval_env, best_model_save_path=save_dir, log_path=save_dir,
+            eval_freq=max(args.eval_freq // max(args.n_envs, 1), 1),
+            n_eval_episodes=args.eval_episodes, deterministic=True))
+        print(f"[eval] EvalCallback activo -> mejor modelo en {save_dir}/best_model.zip")
+    callback = CallbackList(cbs)
+
     try:
         model.learn(total_timesteps=args.total_timesteps, progress_bar=True,
-                    reset_num_timesteps=load_from is None, callback=hist_cb)
+                    reset_num_timesteps=load_from is None, callback=callback)
     except ImportError:
         # falta tqdm/rich para la barra: entrena igual sin progress_bar
         model.learn(total_timesteps=args.total_timesteps, progress_bar=False,
-                    reset_num_timesteps=load_from is None, callback=hist_cb)
+                    reset_num_timesteps=load_from is None, callback=callback)
 
     model.save(out)
+    if is_state and args.vecnormalize:
+        try:
+            venv.save(os.path.join(save_dir, "vecnormalize.pkl"))
+            print(f"[ok] estadisticas VecNormalize -> {save_dir}/vecnormalize.pkl")
+        except Exception as e:
+            warnings.warn(f"no pude guardar VecNormalize: {e}")
     venv.close()
+    if eval_env is not None:
+        eval_env.close()
     print(f"[ok] politica guardada en {out}")
 
     # --- plots al finalizar el training ---

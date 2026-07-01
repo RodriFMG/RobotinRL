@@ -2,8 +2,8 @@
 eval_policy.py - carga una política PPO entrenada y la ejecuta en RoombitaEnv.
 
 Ejemplos:
-
-  # Evaluar política entrenada con estado interno
+ 
+  # Evaluar política entrenada con estado interno XD
   python eval_policy.py --model models/policy_model.zip --track=simple_line --obs_mode=state --episodes=5 --show=true
 
   # Evaluar política entrenada con máscara directa del simulador
@@ -34,8 +34,10 @@ import os
 import cv2
 import json
 import time
+import pickle
 import argparse
 import datetime
+import warnings
 import numpy as np
 
 
@@ -80,6 +82,53 @@ def put_title(img, title):
     return out
 
 
+class FrameStacker:
+    """Replica VecFrameStack (canales al final) para un solo entorno en evaluacion:
+    reset -> [0,...,0,obs];  append -> corre la ventana y coloca el frame nuevo al final."""
+    def __init__(self, n_stack, frame_shape):
+        self.n = int(n_stack)
+        self.c = int(frame_shape[-1])
+        self.buf = np.zeros((*frame_shape[:-1], self.c * self.n), np.uint8)
+
+    def reset(self, obs):
+        obs = ensure_uint8_img(obs)
+        self.buf[:] = 0
+        self.buf[..., -self.c:] = obs
+        return self.buf.copy()
+
+    def append(self, obs):
+        obs = ensure_uint8_img(obs)
+        self.buf = np.roll(self.buf, -self.c, axis=-1)
+        self.buf[..., -self.c:] = obs
+        return self.buf.copy()
+
+
+def _infer_frame_stack(model, base_shape):
+    """Deduce N del modelo. SB3 guarda imagenes en channels-first (C*N,H,W) tras
+    VecTransposeImage; tambien se contempla el caso channels-last (H,W,C*N)."""
+    ms = tuple(model.observation_space.shape)
+    if len(ms) != 3 or len(base_shape) != 3:
+        return 1
+    c = base_shape[2]
+    if not c:
+        return 1
+    if ms[1:] == tuple(base_shape[:2]) and ms[0] % c == 0:      # channels-first (SB3)
+        return ms[0] // c
+    if ms[:2] == tuple(base_shape[:2]) and ms[2] % c == 0:      # channels-last
+        return ms[2] // c
+    return 1
+
+
+def _to_model_layout(o, model_shape):
+    """Coloca la obs apilada (H,W,C*N) en el layout EXACTO que espera el modelo.
+    SB3 no auto-transpone imagenes con >4 canales, asi que lo hacemos nosotros."""
+    if tuple(o.shape) == tuple(model_shape):
+        return o
+    if o.ndim == 3 and tuple(np.transpose(o, (2, 0, 1)).shape) == tuple(model_shape):
+        return np.ascontiguousarray(np.transpose(o, (2, 0, 1)))
+    return o
+
+
 def main():
     ap = argparse.ArgumentParser()
 
@@ -112,6 +161,12 @@ def main():
     ap.add_argument("--record", type=str2bool, default=False,
                     help="Guarda clips .npz para ver luego.")
     ap.add_argument("--fps", type=float, default=20.0)
+
+    ap.add_argument("--frame_stack", type=int, default=0,
+                    help="apila N frames (igual que en train_ppo). 0 = auto-detectar del modelo.")
+    ap.add_argument("--vecnorm", type=str, default="auto",
+                    help="ruta a vecnormalize.pkl (SOLO obs_mode=state). "
+                         "'auto' = buscar junto al modelo; '' = no usar.")
 
     args = ap.parse_args()
 
@@ -198,6 +253,45 @@ def main():
         return pred
 
     # ---------------------------------------------------------
+    # Wrappers para IGUALAR el entrenamiento: frame stacking y VecNormalize.
+    # Sin esto, una politica entrenada con --frame_stack/--vecnormalize no carga
+    # o recibe observaciones fuera de distribucion.
+    # ---------------------------------------------------------
+    base_frame_shape = ((args.cam_h, args.cam_w, 3) if segmenter is not None
+                        else tuple(env.observation_space.shape))
+
+    model_obs_shape = tuple(model.observation_space.shape)
+    n_stack = args.frame_stack if args.frame_stack > 0 else _infer_frame_stack(model, base_frame_shape)
+    stacker = FrameStacker(n_stack, base_frame_shape) if (n_stack > 1 and len(base_frame_shape) == 3) else None
+    if stacker is not None:
+        print(f"[eval] frame_stack={n_stack} -> obs del policy {model_obs_shape}")
+
+    vecnorm = None
+    if args.obs_mode == "state" and args.vecnorm:
+        vn_path = args.vecnorm
+        if vn_path == "auto":
+            cand = os.path.join(os.path.dirname(args.model) or ".", "vecnormalize.pkl")
+            vn_path = cand if os.path.exists(cand) else ""
+        if vn_path and os.path.exists(vn_path):
+            with open(vn_path, "rb") as f:
+                vecnorm = pickle.load(f)
+            vecnorm.training = False
+            print(f"[eval] VecNormalize cargado (obs normalizada): {vn_path}")
+        elif args.vecnorm != "auto":
+            warnings.warn(f"--vecnorm={args.vecnorm} no existe; se evalua SIN normalizar.")
+
+    def transform(raw_obs, first):
+        """raw env obs -> (obs que espera el policy, frame single para visualizar)."""
+        base = policy_obs(raw_obs)                       # aplica segmentador si obs_mode=seg
+        o = base
+        if vecnorm is not None:
+            o = vecnorm.normalize_obs(np.asarray(base, np.float32)).astype(np.float32)
+        if stacker is not None:
+            o = stacker.reset(o) if first else stacker.append(o)
+            o = _to_model_layout(o, model_obs_shape)     # channels-first si el modelo lo pide
+        return o, base
+
+    # ---------------------------------------------------------
     # Carpeta de grabación
     # ---------------------------------------------------------
     sess = None
@@ -231,9 +325,11 @@ def main():
         done_l = []
 
         info = {}
+        first = True
 
         while not done:
-            obs_for_policy = policy_obs(obs)
+            obs_for_policy, vis_base = transform(obs, first)
+            first = False
 
             action, _ = model.predict(obs_for_policy, deterministic=True)
 
@@ -248,7 +344,7 @@ def main():
             sim_seg_view = env.vis.seg_map(env.d)
             obstacle_view = env.vis.overlay(rgb_view, env.d)
 
-            pred_seg_view = ensure_uint8_img(obs_for_policy)
+            pred_seg_view = ensure_uint8_img(vis_base)   # frame single (post-segmentador), no el stack
 
             # Mostrar ventana
             if args.show:

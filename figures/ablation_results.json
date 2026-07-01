@@ -1,0 +1,202 @@
+{
+  "checkpoint_sweep": [
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": -187.87862151194525,
+      "reward_std": 1.374772708486869,
+      "len_mean": 1875.0,
+      "goal_rate": 0.0,
+      "flip_rate": 0.0,
+      "lost_rate": 0.0,
+      "timeout_rate": 1.0,
+      "outcomes": {
+        "timeout": 10
+      },
+      "steps": 100000
+    },
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": -6.79297432126242,
+      "reward_std": 8.421509278955991,
+      "len_mean": 173.7,
+      "goal_rate": 0.0,
+      "flip_rate": 1.0,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 10
+      },
+      "steps": 300000
+    },
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": -8.515668455575685,
+      "reward_std": 33.15924808593213,
+      "len_mean": 324.4,
+      "goal_rate": 0.0,
+      "flip_rate": 1.0,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 10
+      },
+      "steps": 500000
+    },
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": 18.494955817866874,
+      "reward_std": 49.09336385483162,
+      "len_mean": 422.7,
+      "goal_rate": 0.1,
+      "flip_rate": 0.9,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 9,
+        "goal": 1
+      },
+      "steps": 700000
+    },
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": 46.961814178633425,
+      "reward_std": 62.985178610324304,
+      "len_mean": 587.0,
+      "goal_rate": 0.3,
+      "flip_rate": 0.7,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 7,
+        "goal": 3
+      },
+      "steps": 900000
+    },
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": 35.640443678667076,
+      "reward_std": 50.142670942929456,
+      "len_mean": 511.7,
+      "goal_rate": 0.2,
+      "flip_rate": 0.8,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 8,
+        "goal": 2
+      },
+      "steps": 1000000
+    }
+  ],
+  "perception": [
+    {
+      "track": "oval",
+      "mode": "mask",
+      "episodes": 10,
+      "reward_mean": 37.942784027146196,
+      "reward_std": 44.44649164347657,
+      "len_mean": 550.1,
+      "goal_rate": 0.2,
+      "flip_rate": 0.8,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "goal": 2,
+        "flip": 8
+      }
+    },
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": 30.10357207552362,
+      "reward_std": 53.83183401904027,
+      "len_mean": 559.6,
+      "goal_rate": 0.2,
+      "flip_rate": 0.8,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 8,
+        "goal": 2
+      }
+    }
+  ],
+  "track_gen": [
+    {
+      "track": "straight",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": -17.79659817004587,
+      "reward_std": 62.94309450900551,
+      "len_mean": 543.9,
+      "goal_rate": 0.1,
+      "flip_rate": 0.9,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 9,
+        "goal": 1
+      }
+    },
+    {
+      "track": "oval",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": 18.724636083717712,
+      "reward_std": 70.36656000990531,
+      "len_mean": 660.5,
+      "goal_rate": 0.2,
+      "flip_rate": 0.8,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 8,
+        "goal": 2
+      }
+    },
+    {
+      "track": "s_curve",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": 3.80876163508958,
+      "reward_std": 37.82256900754546,
+      "len_mean": 356.3,
+      "goal_rate": 0.2,
+      "flip_rate": 0.8,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 8,
+        "goal": 2
+      }
+    },
+    {
+      "track": "zigzag",
+      "mode": "seg",
+      "episodes": 10,
+      "reward_mean": 1.6197108535369922,
+      "reward_std": 26.043870324971248,
+      "len_mean": 373.6,
+      "goal_rate": 0.0,
+      "flip_rate": 1.0,
+      "lost_rate": 0.0,
+      "timeout_rate": 0.0,
+      "outcomes": {
+        "flip": 10
+      }
+    }
+  ]
+}

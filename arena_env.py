@@ -262,16 +262,17 @@ class Rewards:
       flip      - vuelco/inestabilidad (TERMINA)
     """
     DEFAULT_W = dict(
-        progress=8.0,        
-        safe=0.01,           
-        arrival=45.0,        
-        speed_bonus=20.0,    
-        wrong_dir=20.0,      
-        timeout=8.0,         
-        timeout_per_m=1.5,   
-        collision=6.0,       
-        stuck=1.0, avoid=4.0,
-        offtrack=0.10, ret=1.5, flip=8.0
+        progress=8.0,        # driver principal, bien escalado (~56 por vuelta de 7 m)
+        safe=0.02,
+        arrival=50.0,
+        speed_bonus=15.0,    # < arrival: no premiar velocidad temeraria
+        wrong_dir=30.0,      # claramente peor que un timeout
+        timeout=5.0,
+        timeout_per_m=1.5,
+        collision=8.0,       # los choques deben doler (robustez / sim2real)
+        stuck=1.5, avoid=3.0,
+        offtrack=0.20,       # salir del carril no debe ser barato (anti wiggle)
+        ret=0.8, flip=15.0   # volcar es catastrofico -> se desincentiva fuerte
     )
 
     def __init__(self, model, data, track, field, weights=None,
@@ -325,6 +326,7 @@ class Rewards:
         self.on_track = abs(lat) <= self.track.width
         self.cool = {}                     # gid -> cooldown restante (s)
         self.stuck_t = 0.0
+        self.off_S0 = None                 # progreso al salirse de la pista (para gate de ret)
         self.avoid = {}                    # k -> estado de esquive
         for k in self.field.active:
             self.avoid[k] = {"near": False, "collided": False, "done": False, "S0": 0.0}
@@ -358,11 +360,16 @@ class Rewards:
                 r += self.W["safe"]; self.comp["safe"] += self.W["safe"]
             elif ds < 0:
                 r -= self.W["safe"]; self.comp["safe"] -= self.W["safe"]
-        # fuera / retorno
+        # fuera / retorno (ret solo si hubo AVANCE real durante la salida -> anti-exploit
+        # de oscilar sobre el borde para farmear +ret cada vez que se vuelve a entrar)
         if not on:
             r -= self.W["offtrack"]; self.comp["offtrack"] -= self.W["offtrack"]
-        elif not self.on_track:
-            r += self.W["ret"]; self.comp["ret"] += self.W["ret"]
+            if self.off_S0 is None:
+                self.off_S0 = self.S
+        elif not self.on_track:                       # acaba de volver a la pista
+            if self.off_S0 is not None and (self.S - self.off_S0) > 0.15:
+                r += self.W["ret"]; self.comp["ret"] += self.W["ret"]
+            self.off_S0 = None
 
         self.on_track = on
 

@@ -4,3 +4,9 @@ runs/
 runs_eval/
 *.npz
 .idea/
+
+models/
+main.tex
+referencias_partial.bib
+referencias.bib
+partial_project.tex
