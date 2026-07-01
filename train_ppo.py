@@ -180,7 +180,7 @@ def make_env_fn(args, seed):
         env_obs_mode = "rgb" if args.obs_mode == "seg" else args.obs_mode
         cam_w = args.seg_res if args.obs_mode == "seg" else args.cam_w
         cam_h = args.seg_res if args.obs_mode == "seg" else args.cam_h
-        
+
         env = RoombitaEnv(
             track=args.track, obs_mode=env_obs_mode,
             obstacle_slots=args.obstacle_slots, obstacle_prob=args.obstacle_prob,
@@ -214,7 +214,7 @@ def main():
     # Camara
     ap.add_argument("--cam_w", type=int, default=84)
     ap.add_argument("--cam_h", type=int, default=84)
-    ap.add_argument("--seg_res", type=int, default=128,
+    ap.add_argument("--seg_res", type=int, default=256,
                     help="resolucion ALTA a la que se renderiza el RGB y segmenta; la mascara sale a cam_w/cam_h para PPO")
     # Obstaculos / episodio
     ap.add_argument("--obstacle_slots", type=int, default=4)
@@ -224,7 +224,7 @@ def main():
     ap.add_argument("--random_brightness", action="store_true")
     # PPO
     ap.add_argument("--total_timesteps", type=int, default=100000)
-    ap.add_argument("--device", type=str, default="auto")
+    ap.add_argument("--device", type=str, default="cuda")
     ap.add_argument("--learning_rate", type=float, default=3e-4)
     ap.add_argument("--gamma", type=float, default=0.995)
     ap.add_argument("--gae_lambda", type=float, default=0.95)
